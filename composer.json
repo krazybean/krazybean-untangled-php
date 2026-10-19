@@ -1,0 +1,41 @@
+{
+    "name": "krazybean/untangled",
+    "description": "Dependency health your whole team can understand: cycles and coupling in PHP projects, in a report anyone can read.",
+    "type": "library",
+    "license": "MIT",
+    "homepage": "https://github.com/krazybean/Untangled",
+    "keywords": [
+        "dependencies",
+        "coupling",
+        "cycles",
+        "architecture",
+        "static-analysis",
+        "graph",
+        "snakefood"
+    ],
+    "authors": [
+        {
+            "name": "Juan Castro"
+        }
+    ],
+    "require": {
+        "php": ">=8.2",
+        "nikic/php-parser": "^5.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Untangled\\": "src/"
+        }
+    },
+    "bin": [
+        "bin/untangled",
+        "bin/utg"
+    ],
+    "support": {
+        "issues": "https://github.com/krazybean/Untangled/issues",
+        "source": "https://github.com/krazybean/Untangled/tree/main/php",
+        "docs": "https://github.com/krazybean/Untangled/blob/main/php/README.md"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

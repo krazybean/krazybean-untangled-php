@@ -25,7 +25,7 @@ final class FileScanner
     {
         $code = @file_get_contents($absolutePath);
         if ($code === false) {
-            return FileResult::failed('cannot read file');
+            return FileResult::failed('cannot read file', 'read');
         }
         return $this->scanCode($code, $absolutePath);
     }
@@ -35,7 +35,7 @@ final class FileScanner
         try {
             $ast = $this->parser->parse($code) ?? [];
         } catch (Error $e) {
-            return FileResult::failed('parse error: ' . $e->getMessage());
+            return FileResult::failed('parse error: ' . $e->getMessage(), 'parse');
         }
 
         $collector = new ReferenceCollector($code, $absolutePath);

@@ -31,12 +31,14 @@ final class FileResult
         public readonly array $references,
         public readonly array $includes,
         public readonly ?string $error = null,
+        /** With $error, the pairs document's `error` for the file: "parse" or "read". */
+        public readonly ?string $unread = null,
     ) {
     }
 
-    public static function failed(string $error): self
+    public static function failed(string $error, string $unread): self
     {
-        return new self(null, [], [], [], [], [], $error);
+        return new self(null, [], [], [], [], [], $error, $unread);
     }
 
     /** @return list<string> */

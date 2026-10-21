@@ -19,12 +19,14 @@ final class Report
      * @param array<string, mixed> $analysis the analysis document
      * @param PairsDocument $graph the unit graph: the filtered file graph, or its clustered form
      * @param array<string, int> $dropped per cluster, how many file edges fell inside it
+     * @param array<string, string> $unread the files the scanner could not read, sorted, each with its `error` ("parse" or "read")
      */
     private function __construct(
         public readonly string $title,
         public readonly array $analysis,
         public readonly PairsDocument $graph,
         public readonly array $dropped,
+        public readonly array $unread,
     ) {
     }
 
@@ -35,12 +37,18 @@ final class Report
     public static function build(string $title, PairsDocument $files, ?Clustering $clustering = null): self
     {
         $analysis = (new Analyzer())->analyze($files, $clustering);
+        $unread = [];
+        foreach ($files->nodes() as $node) {
+            if ($node['kind'] === PairsDocument::INTERNAL && is_string($node['error'] ?? null)) {
+                $unread[$node['id']] = $node['error'];
+            }
+        }
         $graph = $files;
         $dropped = [];
         if ($clustering !== null) {
             ['document' => $graph, 'dropped' => $dropped] = $clustering->apply($files);
         }
-        return new self($title, $analysis, $graph, $dropped);
+        return new self($title, $analysis, $graph, $dropped, $unread);
     }
 
     public function isClustered(): bool

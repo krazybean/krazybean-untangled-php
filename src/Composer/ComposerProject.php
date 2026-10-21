@@ -115,6 +115,29 @@ final class ComposerProject
         return is_file($this->root . '/' . $this->vendorDir() . '/composer/installed.json') || is_file($this->root . '/composer.lock');
     }
 
+    /**
+     * Why the package list cannot be read, or null when it can or there is none: a
+     * vendor/composer/installed.json or composer.lock that is not a JSON object.
+     */
+    public function packageListError(): ?string
+    {
+        $installed = $this->vendorDir() . '/composer/installed.json';
+        $file = is_file($this->root . '/' . $installed) ? $installed : 'composer.lock';
+        if (!is_file($this->root . '/' . $file)) {
+            return null;
+        }
+        $text = @file_get_contents($this->root . '/' . $file);
+        if ($text === false) {
+            return "{$file}: cannot read it";
+        }
+        try {
+            $data = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            return "{$file}: not valid JSON ({$e->getMessage()})";
+        }
+        return is_array($data) ? null : "{$file}: not a JSON object";
+    }
+
     /** Whether composer.json requires any package (platform requirements such as php and ext-* aside). */
     public function requiresPackages(): bool
     {

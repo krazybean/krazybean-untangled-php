@@ -61,7 +61,24 @@ $percent = (int) round($s['units_in_cycles_ratio'] * 100);
     <?php if ($s['unresolved_references'] > 0): ?>
       <div class="card tile"><div class="value"><?= $e(R::number($s['unresolved_references'])) ?></div><div class="label"><?= $s['unresolved_references'] === 1 ? 'reference' : 'references' ?> we could not trace</div></div>
     <?php endif ?>
+    <?php if ($unread !== []): ?>
+      <div class="card tile alert"><div class="value"><?= $e(R::number(count($unread))) ?></div><div class="label"><?= count($unread) === 1 ? 'file' : 'files' ?> we could not read</div></div>
+    <?php endif ?>
   </div>
+  <?php if ($unread !== []): ?>
+    <?php $file = static fn (string $id, string $error): string => '<li><span class="mono">' . $e($id) . '</span><span class="count">' . $e(R::UNREAD[$error] ?? $error) . '</span></li>' ?>
+    <div class="card" style="margin-top: 16px">
+      <h3>Files we could not read</h3>
+      <p class="muted small"><?= $e(R::UNREAD_LINE) ?></p>
+      <ul class="rank"><?php foreach (array_slice($unread, 0, R::LIST_LIMIT, true) as $id => $error): ?><?= $file($id, $error) ?><?php endforeach ?></ul>
+      <?php if (count($unread) > R::LIST_LIMIT): ?>
+        <details>
+          <summary><?= $e(R::count(count($unread) - R::LIST_LIMIT, 'more file')) ?></summary>
+          <ul class="rank"><?php foreach (array_slice($unread, R::LIST_LIMIT, null, true) as $id => $error): ?><?= $file($id, $error) ?><?php endforeach ?></ul>
+        </details>
+      <?php endif ?>
+    </div>
+  <?php endif ?>
 </section>
 
 <section id="why" aria-labelledby="why-title">

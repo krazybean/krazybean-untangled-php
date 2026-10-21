@@ -11,7 +11,15 @@
         "architecture",
         "static-analysis",
         "graph",
-        "snakefood"
+        "snakefood",
+        "dependency-graph",
+        "code-dependencies",
+        "circular-dependencies",
+        "import-graph",
+        "module-dependencies",
+        "code-visualization",
+        "dependency-health",
+        "php"
     ],
     "authors": [
         {

@@ -341,8 +341,11 @@ The full rules are in the [PHP profile](https://github.com/krazybean/Untangled/b
 Warnings go to standard error and do not change the exit code, so output
 piped to a file stays clean. The scanner warns when `.php` files were left
 out (naming the folders that hold them, so you can decide what to pass to
-`--source`) and when there is no `vendor/` or `composer.lock` to trace
-packages with.
+`--source`), when there is no `vendor/` or `composer.lock` to trace
+packages with or the one it finds is not valid JSON, when it finds no files
+to scan at all, and for each file that does not parse. Such a file stays in
+the pairs document marked `"error": "parse"`, and the report lists it under
+"Files we could not read".
 
 ## Development
 

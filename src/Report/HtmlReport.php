@@ -38,6 +38,11 @@ final class HtmlReport
     /** How many packages and untraced references are listed before the rest fold away. */
     public const LIST_LIMIT = 15;
 
+    /** What a file's `error` (spec/pairs-format.md) says, in the report. */
+    public const UNREAD = ['parse' => 'does not parse', 'read' => 'cannot be read'];
+
+    public const UNREAD_LINE = 'Any dependencies these files have are missing from every number in this report.';
+
     public static function render(Report $report, ?\DateTimeInterface $generatedAt = null): string
     {
         $analysis = $report->analysis;
@@ -70,6 +75,7 @@ final class HtmlReport
             'leaning' => self::top($units, 'fan_out'),
             'packages' => $report->targets(PairsDocument::EXTERNAL),
             'unresolved' => $report->targets(PairsDocument::UNRESOLVED),
+            'unread' => $report->unread,
             'dropped' => $report->dropped,
             'plain' => self::PLAIN,
             'css' => self::resource('report.css'),
@@ -122,8 +128,13 @@ final class HtmlReport
         }
         [$strategy, $depth] = explode(':', $clustering);
         $levels = self::count((int) $depth, 'level');
-        // Python has packages where PHP has namespaces.
-        $namespace = $language === 'python' ? 'package path' : 'namespace';
+        // Python has packages where PHP has namespaces; JavaScript has neither, so namespace:N
+        // groups by folder.
+        $namespace = match ($language) {
+            'python' => 'package path',
+            'typescript' => 'folder path',
+            default => 'namespace',
+        };
         return $strategy === 'namespace'
             ? "Each part is a group of files that share the first {$levels} of their {$namespace}."
             : "Each part is a group of files that share the first {$levels} of their folder path.";

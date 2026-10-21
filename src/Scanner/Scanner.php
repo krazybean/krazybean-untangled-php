@@ -17,6 +17,9 @@ use Untangled\Path;
  */
 final class Scanner
 {
+    public const NOTHING_SCANNED = 'no PHP files were found to scan: composer.json autoloads none and no --source folder'
+        . ' holds any, so there is nothing to analyze';
+
     private readonly FileScanner $fileScanner;
 
     /** Classes Composer writes into vendor/composer/ itself, provided by its composer-runtime-api. */
@@ -79,8 +82,15 @@ final class Scanner
             }
         }
         ksort($results, SORT_STRING);
+        if ($results === []) {
+            $warnings[] = self::NOTHING_SCANNED;
+        }
 
-        if (!$project->hasPackageList() && $project->requiresPackages()) {
+        $packageListError = $project->packageListError();
+        if ($packageListError !== null) {
+            $warnings[] = "{$packageListError}, so classes from third-party packages cannot be traced and show as"
+                . ' unresolved; run `composer install` again for a complete picture';
+        } elseif (!$project->hasPackageList() && $project->requiresPackages()) {
             $warnings[] = 'no vendor/composer/installed.json or composer.lock, so classes from third-party packages'
                 . ' cannot be traced and show as unresolved; run `composer install` first for a complete picture';
         }
@@ -126,6 +136,9 @@ final class Scanner
             $symbols = $result->symbols();
             if ($symbols !== []) {
                 $extra['symbols'] = $symbols;
+            }
+            if ($result->unread !== null) {
+                $extra['error'] = $result->unread;
             }
             $pairs->addNode($file, PairsDocument::INTERNAL, $extra);
         }

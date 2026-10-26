@@ -75,13 +75,16 @@ final class ReferenceCollector extends NodeVisitorAbstract
             $this->addType($node->type);
         } elseif ($node instanceof Node\Attribute) {
             $this->addClass($node->name, 'attribute');
-        } elseif ($node instanceof Expr\New_ && $node->class instanceof Name) {
-            $this->addClass($node->class, 'new');
-        } elseif (($node instanceof Expr\StaticCall || $node instanceof Expr\ClassConstFetch || $node instanceof Expr\StaticPropertyFetch)
-            && $node->class instanceof Name) {
-            $this->addClass($node->class, 'static');
-        } elseif ($node instanceof Expr\Instanceof_ && $node->class instanceof Name) {
-            $this->addClass($node->class, 'instanceof');
+        } elseif ($node instanceof Expr\New_) {
+            $this->addClassExpr($node->class, 'new');
+        } elseif ($node instanceof Expr\StaticCall || $node instanceof Expr\ClassConstFetch || $node instanceof Expr\StaticPropertyFetch) {
+            // `$object::class` names no class to load, so it is not a dynamic reference.
+            if (!($node instanceof Expr\ClassConstFetch && $node->class instanceof Expr && $node->name instanceof Node\Identifier
+                && $node->name->toLowerString() === 'class')) {
+                $this->addClassExpr($node->class, 'static');
+            }
+        } elseif ($node instanceof Expr\Instanceof_) {
+            $this->addClassExpr($node->class, 'instanceof');
         } elseif ($node instanceof Expr\FuncCall && $node->name instanceof Name) {
             $this->addFunctionCall($node);
         } elseif ($node instanceof Expr\ConstFetch) {
@@ -167,6 +170,21 @@ final class ReferenceCollector extends NodeVisitorAbstract
             $resolved = $name->toString();
         }
         $this->references[] = ['symbol' => FileResult::CLASS_SYMBOL, 'candidates' => [$resolved], 'kind' => $kind];
+    }
+
+    /**
+     * A class named in code: a Name is resolved, an expression becomes a dynamic reference.
+     * `$this::X` is the enclosing class, like `static::X`, so it names nothing to resolve.
+     */
+    private function addClassExpr(Node $class, string $kind): void
+    {
+        if ($class instanceof Name) {
+            $this->addClass($class, $kind);
+        } elseif ($class instanceof Expr\Variable && $class->name === 'this') {
+            return;
+        } elseif ($class instanceof Expr) {
+            $this->references[] = ['symbol' => FileResult::DYNAMIC_SYMBOL, 'candidates' => [$this->sourceText($class)], 'kind' => $kind];
+        }
     }
 
     private function addType(?Node $type): void

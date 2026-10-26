@@ -14,6 +14,9 @@ use Untangled\Graph\PairsDocument;
  */
 final class Clustering
 {
+    /** How many unmatched nodes the warning names. */
+    private const NAMED_UNMATCHED = 5;
+
     /** @param list<array{prefix: string, cluster: string}> $rules */
     private function __construct(
         public readonly string $strategy,
@@ -80,17 +83,23 @@ final class Clustering
         return $this->strategy === 'rules' ? 'rules' : "{$this->strategy}:{$this->depth}";
     }
 
+    /** The cluster of the first rule whose prefix starts $id, or null when none does. */
+    private function ruleFor(string $id): ?string
+    {
+        foreach ($this->rules as $rule) {
+            if (str_starts_with($id, $rule['prefix'])) {
+                return $rule['cluster'];
+            }
+        }
+        return null;
+    }
+
     /** @param array<string, mixed> $node an internal node of a pairs document */
     public function clusterOf(array $node): string
     {
         $id = $node['id'];
         if ($this->strategy === 'rules') {
-            foreach ($this->rules as $rule) {
-                if (str_starts_with($id, $rule['prefix'])) {
-                    return $rule['cluster'];
-                }
-            }
-            return $id;
+            return $this->ruleFor($id) ?? $id;
         }
         if ($this->strategy === 'namespace' && is_string($node['module'] ?? null) && $node['module'] !== '') {
             // Segments are separated by `\` (PHP namespaces) or `.` (Python modules); the
@@ -101,6 +110,47 @@ final class Clustering
         $directories = explode('/', $id);
         array_pop($directories);
         return $directories === [] ? '.' : implode('/', array_slice($directories, 0, $this->depth));
+    }
+
+    /**
+     * The internal nodes no rule matches, sorted. Each is its own cluster, so a new top-level
+     * folder that no rule names would otherwise drop out of the context view unnoticed.
+     * Always empty for namespace and folder clustering, which place every node.
+     *
+     * @return list<string>
+     */
+    public function unmatched(PairsDocument $files): array
+    {
+        if ($this->strategy !== 'rules') {
+            return [];
+        }
+        $unmatched = [];
+        foreach ($files->nodes() as $node) {
+            if ($node['kind'] !== PairsDocument::INTERNAL) {
+                continue;
+            }
+            if ($this->ruleFor($node['id']) === null) {
+                $unmatched[] = $node['id'];
+            }
+        }
+        sort($unmatched, SORT_STRING);
+        return $unmatched;
+    }
+
+    /**
+     * The sentence for the warning, or the error with --strict, about unmatched nodes:
+     * the first few are named.
+     *
+     * @param non-empty-list<string> $unmatched
+     */
+    public static function describeUnmatched(array $unmatched): string
+    {
+        $count = count($unmatched);
+        $named = implode(', ', array_slice($unmatched, 0, self::NAMED_UNMATCHED));
+        if ($count > self::NAMED_UNMATCHED) {
+            $named .= ' and ' . ($count - self::NAMED_UNMATCHED) . ' more';
+        }
+        return 'rules: ' . ($count === 1 ? '1 file matches no rule and becomes its own cluster' : "{$count} files match no rule and each becomes its own cluster") . ": {$named}";
     }
 
     /**

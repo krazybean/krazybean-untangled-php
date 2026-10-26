@@ -94,8 +94,8 @@ final class ComposerProject
 
     /**
      * The `.php` files under the root that are not in $covered, skipping vendor/, node_modules/,
-     * hidden directories and `exclude-from-classmap` matches: code that no autoload rule reaches
-     * and none deliberately leaves out, sorted.
+     * hidden directories, `exclude-from-classmap` matches and files git ignores (compiled views,
+     * caches): code that no autoload rule reaches and none deliberately leaves out, sorted.
      *
      * @param array<string, true> $covered project-relative paths
      * @return list<string>
@@ -105,8 +105,74 @@ final class ComposerProject
         $all = [];
         $this->collect('', ['php'], $this->excludes([$this->manifest['autoload'] ?? [], $this->manifest['autoload-dev'] ?? []]), $all, ['node_modules']);
         $files = array_keys(array_diff_key($all, $covered));
+        $files = array_values(array_diff($files, $this->gitIgnored($files)));
         sort($files, SORT_STRING);
         return $files;
+    }
+
+    /**
+     * The paths git ignores, by asking `git check-ignore` so that nested .gitignore files,
+     * .git/info/exclude and negations all count. A tracked file is never ignored. Empty when
+     * the root is not in a git repository or git cannot be run: nothing is hidden then.
+     *
+     * Only the project's own rules count: the user's global ignore file belongs to one machine,
+     * and a folder an enclosing repository ignores is no reason to hide what is inside the
+     * project, so a project root that git ignores hides nothing.
+     *
+     * @param list<string> $paths project-relative
+     * @return list<string>
+     */
+    private function gitIgnored(array $paths): array
+    {
+        if ($paths === []) {
+            return [];
+        }
+        // A root with a .git is the top of its own repository; otherwise any ignoring is from above.
+        $parent = dirname($this->root);
+        if (!file_exists($this->root . '/.git') && $parent !== $this->root && self::checkIgnore($parent, [basename($this->root)]) !== []) {
+            return [];
+        }
+        return self::checkIgnore($this->root, $paths);
+    }
+
+    /**
+     * Runs `git check-ignore` in $directory on paths relative to it. Empty when git says none is
+     * ignored, and also when it cannot tell (exit 128: not a repository, or a path beyond a
+     * symbolic link): one such path then brings the ignored files back into the count, which
+     * only ever shows more warnings, never fewer.
+     *
+     * @param list<string> $paths
+     * @return list<string>
+     */
+    private static function checkIgnore(string $directory, array $paths): array
+    {
+        if (!function_exists('proc_open')) {
+            return [];
+        }
+        // The paths go in through a file, not a pipe, so that git never waits on us to read its output.
+        $input = tmpfile();
+        if ($input === false) {
+            return [];
+        }
+        fwrite($input, implode("\0", $paths) . "\0");
+        rewind($input);
+        $process = @proc_open(
+            // An empty core.excludesFile leaves out the user's global ignore file (also the default one).
+            ['git', '-c', 'core.excludesFile=', 'check-ignore', '--stdin', '-z'],
+            [0 => $input, 1 => ['pipe', 'w'], 2 => ['file', PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null', 'w']],
+            $pipes,
+            $directory,
+        );
+        if (!is_resource($process)) {
+            fclose($input);
+            return [];
+        }
+        $output = (string) stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($input);
+        // 0: some are ignored, 1: none are; anything else means we cannot tell.
+        $code = proc_close($process);
+        return $code === 0 ? array_values(array_filter(explode("\0", $output), static fn (string $path): bool => $path !== '')) : [];
     }
 
     /** Whether installed packages can be read, from vendor/composer/installed.json or composer.lock. */

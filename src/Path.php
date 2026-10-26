@@ -8,10 +8,24 @@ namespace Untangled;
 /** Lexical path helpers: no filesystem access, no symlink resolution. */
 final class Path
 {
-    /** Collapses '.', '..' and duplicate separators. Keeps a leading '/' if present. */
+    /** True for a path that starts at a root: '/x', and on Windows 'C:/x' or 'C:\\x'. */
+    public static function isAbsolute(string $path): bool
+    {
+        return preg_match('~^(?:/|[A-Za-z]:[/\\\\])~', $path) === 1;
+    }
+
+    /**
+     * Collapses '.', '..' and duplicate separators, and writes every separator as '/'. Keeps a
+     * leading '/' if present, and a Windows drive ('C:/') with its letter in upper case.
+     */
     public static function normalize(string $path): string
     {
         $path = str_replace('\\', '/', $path);
+        $drive = '';
+        if (preg_match('~^([A-Za-z]):(?:/|$)~', $path, $match) === 1) {
+            $drive = strtoupper($match[1]) . ':';
+            $path = '/' . substr($path, 2);
+        }
         $absolute = str_starts_with($path, '/');
         $parts = [];
         foreach (explode('/', $path) as $part) {
@@ -28,12 +42,12 @@ final class Path
             }
             $parts[] = $part;
         }
-        return ($absolute ? '/' : '') . implode('/', $parts);
+        return $drive . ($absolute ? '/' : '') . implode('/', $parts);
     }
 
     public static function join(string $base, string $path): string
     {
-        return str_starts_with(str_replace('\\', '/', $path), '/') ? self::normalize($path) : self::normalize($base . '/' . $path);
+        return self::isAbsolute($path) ? self::normalize($path) : self::normalize($base . '/' . $path);
     }
 
     /** The path of $absolute relative to $root, or null when it is outside $root. */

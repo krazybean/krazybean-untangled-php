@@ -28,7 +28,7 @@ final class Dot
         $cycleOf = $report->cycleOf();
         $lines = [
             'digraph untangled {',
-            '  graph [rankdir=LR, fontname="Helvetica"];',
+            '  graph [layout=dot, rankdir=LR, fontname="Helvetica"];',
             '  node [shape=box, style=rounded, fontname="Helvetica"];',
             '  edge [color="#898781"];',
         ];
@@ -67,7 +67,7 @@ final class Dot
         $clustered = $report->isClustered();
         $lines = [
             'digraph untangled {',
-            '  graph [rankdir=LR];',
+            '  graph [layout=dot, rankdir=LR];',
             '  node [shape=ellipse, style=filled, fillcolor=lightgrey, fontname="Times-Roman", fontsize=7];',
             '  edge [color=black];',
         ];

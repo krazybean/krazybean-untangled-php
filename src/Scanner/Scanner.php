@@ -149,6 +149,7 @@ final class Scanner
             foreach ($result->references as $reference) {
                 $target = match ($reference['symbol']) {
                     FileResult::CLASS_SYMBOL => $resolved[$reference['candidates'][0]] ??= $this->resolveAlias($reference['candidates'][0], $classes, $vendor, $aliases),
+                    FileResult::DYNAMIC_SYMBOL => 'unresolved:dynamic:' . $reference['candidates'][0],
                     FileResult::FUNCTION_SYMBOL => self::firstMatch($reference['candidates'], $functions, true),
                     default => self::firstMatch($reference['candidates'], $constants, false),
                 };
@@ -301,7 +302,7 @@ final class Scanner
             return 'unresolved:include:' . $include['text'];
         }
         $path = $include['path'];
-        $isAbsolute = str_starts_with(str_replace('\\', '/', $path), '/');
+        $isAbsolute = Path::isAbsolute($path);
         // A relative path is tried against the project root (PHP's working directory
         // when run from the root), then against the including file's directory, then
         // against each --source folder (legacy applications put those on include_path).

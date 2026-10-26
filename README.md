@@ -62,6 +62,8 @@ untangled scan    [<path>]               [scan options] [--format=json|snakefood
 untangled analyze [<path>|<pairs.json>]  [scan options] [filter options] [--output=<file>]
 untangled report  [<path>|<pairs.json>]  [scan options] [filter options]
                                          [--format=html|dot] [--style=classic] [--title=<text>] [--output=<file>]
+untangled dependents [<path>|<pairs.json>] <file-or-symbol>... [scan options] [--include/--exclude ...]
+                                         [--transitive] [--format=text|json] [--output=<file>]
 ```
 
 Each command runs the steps before it: `analyze` scans first, and `report`
@@ -133,6 +135,30 @@ It holds:
 
 What each number means, and why it matters, is in [metrics](https://github.com/krazybean/Untangled/blob/main/spec/metrics.md).
 
+### dependents
+
+Lists the files that depend on one or more files, before you change them or
+when you choose which tests to run. A target is a node id (a file path) or,
+where the scanner records them, a declared symbol (`App\\Billing\\Tax`).
+
+```sh
+vendor/bin/untangled dependents /path/to/project src/Billing/Tax.php
+vendor/bin/untangled dependents /path/to/project App\\Billing\\Tax --transitive
+vendor/bin/untangled dependents pairs.json src/Billing/Tax.php --transitive --format=json
+vendor/bin/untangled dependents /path/to/project src/Billing/Tax.php --transitive --exclude='**' --include='tests/**'
+```
+
+By default it lists the direct dependents. `--transitive` adds the files that
+depend on those, and so on, each with its depth (the shortest distance from a
+target). `--include` and `--exclude` filter the list, not the walk, so a test
+that reaches a target only through application code is still found (scan with
+`--dev` to have tests in the graph). The text form groups files by folder;
+`--format=json` writes the document of the
+[spec](https://github.com/krazybean/Untangled/blob/main/spec/dependents.md).
+The first argument is the source when it is a folder or a `.json` file; any
+other argument is a target, and the source is the current folder. A target
+that matches nothing exits with code 1.
+
 ### report
 
 Writes one self-contained HTML page meant for people who do not read code.
@@ -162,6 +188,11 @@ vendor/bin/untangled report /path/to/project --format=dot | dot -Tsvg > graph.sv
 vendor/bin/untangled report /path/to/project --format=dot --style=classic --cluster=namespace:2 | dot -Tpng > graph.png
 ```
 
+The file asks for Graphviz's `dot` layout itself, so other Graphviz programs
+and viewers lay it out the same way. On a large project, render a clustered
+graph (`--cluster=namespace:2`, or `folder:2`) rather than one node per file:
+thousands of files take `dot` minutes and come out too small to read.
+
 ## Options
 
 Options are written `--name=value`; a value with spaces needs quotes
@@ -177,6 +208,8 @@ once.
 | `--style=<style>` | `report --format=dot` | `default`, or `classic` for snakefood's black and white `sfood-graph` look. |
 | `--title=<text>` | `report` | The report's title. Default: the Composer package name, else the folder or file name. |
 | `--cluster=<strategy>` | `analyze`, `report` | Group files before measuring: `namespace:N`, `folder:N` or `rules:<file>`. See [Clustering](#clustering). |
+| `--transitive` | `dependents` | Also list the files that depend on a dependent, with their depth. |
+| `--strict` | `analyze`, `report` | With `--cluster=rules:<file>`, exit 1 instead of warning when a file matches no rule. See [Clustering](#clustering). |
 | `--include=<glob>` | `analyze`, `report` | Keep files whose path matches `<glob>`. Repeatable. |
 | `--exclude=<glob>` | `analyze`, `report` | Drop files whose path matches `<glob>`. Repeatable. See [Include and exclude](#include-and-exclude). |
 | `--output=<file>` | all | Write to `<file>` instead of standard output. |
@@ -201,7 +234,10 @@ look at.
 A rules file has one rule per line, a path prefix and a cluster name
 separated by spaces; `#` starts a comment. The first prefix that matches a
 file wins, and a file no rule matches stays on its own. This is the format of
-snakefood's `sfood-cluster`.
+snakefood's `sfood-cluster`. So that a new folder does not drop out of the
+grouped view unnoticed, `analyze` and `report` print a warning on standard
+error that names the files no rule matches; add `--strict` to make it an error
+(exit code 1, no output), for CI.
 
 ```
 # prefix              cluster

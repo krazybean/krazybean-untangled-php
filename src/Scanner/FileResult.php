@@ -13,6 +13,8 @@ final class FileResult
     public const CLASS_SYMBOL = 'class';
     public const FUNCTION_SYMBOL = 'function';
     public const CONSTANT_SYMBOL = 'constant';
+    /** A class named by an expression; the one candidate is the expression's source text. */
+    public const DYNAMIC_SYMBOL = 'dynamic';
 
     /**
      * @param list<string> $classes fully qualified class-like names declared in the file

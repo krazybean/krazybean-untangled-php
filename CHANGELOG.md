@@ -7,6 +7,31 @@ document and the command-line options are the public interface.
 
 ## Unreleased
 
+## 1.1.0
+
+- `--diagnostics=json` writes every warning and error as one JSON object per line on
+  standard error (`level`, `code`, `message`, and `files` when there are any), so CI and
+  agents do not have to read message text. Text stays the default and is unchanged.
+  Every command takes it; standard output, exit codes and the pairs and analysis
+  documents are as before. The codes and the encoding are in spec/diagnostics.md;
+  `--diagnostics=github` is not supported yet.
+
+- `ScanResult::$diagnostics` holds the scan's `Diagnostic` objects. `ScanResult::$warnings`
+  is kept: it is the message of each warning diagnostic. `new ScanResult($pairs, $warnings)`
+  works as before, with `$diagnostics` an optional third argument. `PairsDocument::fromArray()` takes
+  a `$diagnostics` list after `$warnings`. `DependentsException` (a subclass of
+  `InvalidArgumentException`) carries the code of a failed `dependents` query.
+
+- `dependents --max-depth=N` (with `--transitive`) stops the walk after N steps from the
+  targets, and `--through=<glob>` (repeatable) only walks into files that match, so a
+  test that reaches a target only through application code is not found by way of it.
+  `--include` and `--exclude` still filter the list afterwards. `--max-depth` without
+  `--transitive`, or not a positive integer, is a usage error. See spec/dependents.md.
+
+- `dependents` accepts a class name with a leading backslash (`\App\Billing\Tax`),
+  an absolute path inside the project, and a path written with `./` or `\`. An absolute
+  path outside the project is an error rather than a lookup that finds nothing.
+
 ## 1.0.2
 
 - The "not covered by composer.json autoload rules" warning no longer counts

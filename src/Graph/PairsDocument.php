@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 namespace Untangled\Graph;
 
+use Untangled\Diagnostic;
 use Untangled\Text;
 use Untangled\Version;
 
@@ -84,10 +85,12 @@ final class PairsDocument
     /**
      * Reads a pairs document, such as one written by `untangled scan` or by another library.
      * @param array<string, mixed> $data
-     * @param list<string> $warnings receives a warning for an unknown minor version
+     * @param list<string> $warnings receives a warning for an unknown minor version; kept for callers
+     *                               that read strings, new code should read $diagnostics
+     * @param list<Diagnostic> $diagnostics receives the same warning as a diagnostic
      * @throws DocumentException
      */
-    public static function fromArray(array $data, array &$warnings = []): self
+    public static function fromArray(array $data, array &$warnings = [], array &$diagnostics = []): self
     {
         if (($data['format'] ?? null) !== 'untangled-pairs') {
             throw new DocumentException('not an Untangled pairs document (expected "format": "untangled-pairs")');
@@ -99,7 +102,9 @@ final class PairsDocument
             throw new DocumentException("unsupported pairs document version \"{$version}\" (this library reads " . Version::SPEC . ')');
         }
         if ($minor !== $knownMinor) {
-            $warnings[] = "pairs document version {$version} is newer or older than " . Version::SPEC . '; reading it anyway';
+            $message = "pairs document version {$version} is newer or older than " . Version::SPEC . '; reading it anyway';
+            $warnings[] = $message;
+            $diagnostics[] = Diagnostic::warning('document-version', $message);
         }
         if (!is_string($data['language'] ?? null) || !is_array($data['nodes'] ?? null) || !is_array($data['edges'] ?? null)) {
             throw new DocumentException('pairs document needs "language", "nodes" and "edges"');

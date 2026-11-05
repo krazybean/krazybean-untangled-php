@@ -8,11 +8,14 @@ namespace Untangled\Cli;
 use Untangled\Analysis\Analyzer;
 use Untangled\Analysis\Clustering;
 use Untangled\Analysis\Dependents;
+use Untangled\Analysis\DependentsException;
 use Untangled\Analysis\Filter;
 use Untangled\Composer\ProjectException;
+use Untangled\Diagnostic;
 use Untangled\Graph\DocumentException;
 use Untangled\Graph\Json;
 use Untangled\Graph\PairsDocument;
+use Untangled\Path;
 use Untangled\Report\Dot;
 use Untangled\Report\HtmlReport;
 use Untangled\Report\Report;
@@ -34,7 +37,10 @@ final class Application
                untangled report [<path>|<pairs.json>] [--format=html|dot] [--style=classic]
                                  [--title=<text>] [analyze options]
                untangled dependents [<path>|<pairs.json>] <file-or-symbol>... [--transitive]
+                                    [--max-depth=<n>] [--through=<glob>]...
                                     [--format=text|json] [analyze options]
+
+        Every command also takes --diagnostics=text|json.
 
         Commands:
           scan       Write the dependency pairs of a Composer project (default path: .)
@@ -53,21 +59,29 @@ final class Application
                              report: html (default) or dot
                              dependents: text (default) or json
           --transitive       dependents: also the files that depend on a dependent, with their depth
+          --max-depth=N      dependents: with --transitive, stop after N steps from the targets
+          --through=GLOB     dependents: only walk into files matching GLOB (repeatable, any match counts),
+                             so nothing is found by way of other files
           --style=STYLE      report --format=dot only: default, or classic for snakefood's
                              black and white sfood-graph look
           --title=TEXT       report only: the report's title (default: the Composer package name)
           --cluster=STRATEGY analyze, report: namespace:N, folder:N or rules:<file>
           --strict           analyze, report: with rules:<file>, exit 1 instead of warning when a
                              file matches no rule
-          --include=GLOB     analyze, report: keep files matching GLOB (repeatable, last match wins)
-          --exclude=GLOB     analyze, report: drop files matching GLOB (repeatable, last match wins)
+          --include=GLOB     analyze, report, dependents: keep files matching GLOB (repeatable, last match wins)
+          --exclude=GLOB     analyze, report, dependents: drop files matching GLOB (repeatable, last match wins)
           --output=FILE      Write to FILE instead of standard output
+          --diagnostics=FMT  How warnings and errors are written to standard error: text (default),
+                             or json, one object per line with level, code, message and files
           -h, --help         Show this help
           -V, --version      Show the version
 
         TXT;
 
     /** @param resource $stdout @param resource $stderr */
+    /** How diagnostics are written to standard error: `text` or `json` (--diagnostics). */
+    private string $diagnostics = 'text';
+
     public function __construct(
         private $stdout = STDOUT,
         private $stderr = STDERR,
@@ -77,9 +91,11 @@ final class Application
     /** @param list<string> $argv arguments without the program name */
     public function run(array $argv): int
     {
+        $this->diagnostics = 'text';
         $positional = [];
         $options = [];
         $patterns = [];
+        $through = [];
         $sources = [];
         $aliases = [];
         foreach ($argv as $arg) {
@@ -96,6 +112,8 @@ final class Application
                 if ($name === 'include' || $name === 'exclude') {
                     // Order matters for these, so they are kept as a list rather than by name.
                     $patterns[] = [$name, $value];
+                } elseif ($name === 'through' && is_string($value)) {
+                    $through[] = $value;
                 } elseif ($name === 'source' && is_string($value)) {
                     $sources[] = $value;
                 } elseif ($name === 'aliases' && is_string($value)) {
@@ -113,10 +131,10 @@ final class Application
             return 2;
         }
         $allowed = match ($command) {
-            'scan' => ['dev', 'source', 'aliases', 'format', 'output'],
-            'analyze' => ['dev', 'source', 'aliases', 'cluster', 'strict', 'include', 'exclude', 'output'],
-            'report' => ['dev', 'source', 'aliases', 'cluster', 'strict', 'include', 'exclude', 'output', 'format', 'style', 'title'],
-            'dependents' => ['dev', 'source', 'aliases', 'transitive', 'include', 'exclude', 'output', 'format'],
+            'scan' => ['dev', 'source', 'aliases', 'format', 'output', 'diagnostics'],
+            'analyze' => ['dev', 'source', 'aliases', 'cluster', 'strict', 'include', 'exclude', 'output', 'diagnostics'],
+            'report' => ['dev', 'source', 'aliases', 'cluster', 'strict', 'include', 'exclude', 'output', 'format', 'style', 'title', 'diagnostics'],
+            'dependents' => ['dev', 'source', 'aliases', 'transitive', 'max-depth', 'through', 'include', 'exclude', 'output', 'format', 'diagnostics'],
         };
         $unknown = array_diff(array_keys($options), $allowed);
         if ($unknown !== []) {
@@ -133,17 +151,23 @@ final class Application
                 return 2;
             }
         }
+        if (isset($options['diagnostics'])) {
+            if (!in_array($options['diagnostics'], ['text', 'json'], true)) {
+                fwrite($this->stderr, "Unknown diagnostics format: {$options['diagnostics']} (use text or json)\n");
+                return 2;
+            }
+            $this->diagnostics = $options['diagnostics'];
+        }
         try {
             $scanner = new Scanner(dev: isset($options['dev']), sources: $sources, aliases: ClassAliases::load($aliases));
         } catch (\InvalidArgumentException $e) {
-            fwrite($this->stderr, 'error: ' . $e->getMessage() . "\n");
-            return 1;
+            return $this->fail('aliases-unusable', $e->getMessage());
         }
         if ($command === 'analyze' || $command === 'report') {
             return $this->analyze($command, $positional[0] ?? '.', $options, $patterns, $scanner);
         }
         if ($command === 'dependents') {
-            return $this->dependents($positional, $options, $patterns, $scanner);
+            return $this->dependents($positional, $options, $patterns, $through, $scanner);
         }
         $format = $options['format'] ?? 'json';
         if (!in_array($format, ['json', 'snakefood'], true)) {
@@ -155,12 +179,9 @@ final class Application
         try {
             $result = $scanner->scan($path);
         } catch (ProjectException $e) {
-            fwrite($this->stderr, 'error: ' . $e->getMessage() . "\n");
-            return 1;
+            return $this->fail('project-unreadable', $e->getMessage());
         }
-        foreach ($result->warnings as $warning) {
-            fwrite($this->stderr, "warning: {$warning}\n");
-        }
+        $this->report($result->diagnostics);
 
         $output = $format === 'json' ? $result->pairs->toJson() : $result->pairs->toSnakefood($path);
         return $this->write($output, $options['output'] ?? null);
@@ -197,8 +218,7 @@ final class Application
                 $rulesFile = substr($strategy, strlen('rules:'));
                 $rules = is_file($rulesFile) ? file_get_contents($rulesFile) : false;
                 if ($rules === false) {
-                    fwrite($this->stderr, "error: cannot read rules file {$rulesFile}\n");
-                    return 1;
+                    return $this->fail('rules-file-unreadable', "cannot read rules file {$rulesFile}");
                 }
                 $clustering = Clustering::parseRules($rules);
             } elseif (is_string($strategy)) {
@@ -217,11 +237,11 @@ final class Application
         $selected = self::filter($patterns)->apply($pairs);
         $unmatched = $clustering?->unmatched($selected) ?? [];
         if ($unmatched !== []) {
+            $diagnostic = Clustering::unmatchedDiagnostic($unmatched, isset($options['strict']));
+            $this->report([$diagnostic]);
             if (isset($options['strict'])) {
-                fwrite($this->stderr, 'error: ' . Clustering::describeUnmatched($unmatched) . "\n");
                 return 1;
             }
-            fwrite($this->stderr, 'warning: ' . Clustering::describeUnmatched($unmatched) . "\n");
         }
         try {
             if ($command === 'analyze') {
@@ -230,8 +250,7 @@ final class Application
             $title = is_string($options['title'] ?? null) ? $options['title'] : self::title($path);
             $report = Report::build($title, $selected, $clustering);
         } catch (\InvalidArgumentException $e) {
-            fwrite($this->stderr, 'error: ' . $e->getMessage() . "\n");
-            return 1;
+            return $this->fail('document-clustered', $e->getMessage());
         }
         return $this->write($format === 'dot' ? Dot::render($report, $style) : HtmlReport::render($report), $options['output'] ?? null);
     }
@@ -243,13 +262,28 @@ final class Application
      * @param list<string> $positional
      * @param array<string, string|true> $options
      * @param list<array{string, string}> $patterns include / exclude globs in command-line order
+     * @param list<string> $through --through globs
      */
-    private function dependents(array $positional, array $options, array $patterns, Scanner $scanner): int
+    private function dependents(array $positional, array $options, array $patterns, array $through, Scanner $scanner): int
     {
         $format = $options['format'] ?? 'text';
         if (!in_array($format, ['text', 'json'], true)) {
             fwrite($this->stderr, "Unknown format: {$format}\n");
             return 2;
+        }
+        $maxDepth = null;
+        if (isset($options['max-depth'])) {
+            $given = (string) $options['max-depth'];
+            if (preg_match('/\A[1-9][0-9]*\z/', $given) !== 1) {
+                fwrite($this->stderr, "Option --max-depth needs a positive integer, as in --max-depth=2 (got \"{$given}\")\n");
+                return 2;
+            }
+            // More than 9 digits is deeper than any graph, so it is the same as no limit.
+            $maxDepth = strlen($given) > 9 ? 999999999 : (int) $given;
+            if (!isset($options['transitive'])) {
+                fwrite($this->stderr, "--max-depth only applies with --transitive\n");
+                return 2;
+            }
         }
         $first = $positional[0] ?? null;
         $hasSource = $first !== null && (is_dir($first) || (is_file($first) && str_ends_with(strtolower($first), '.json')));
@@ -263,11 +297,20 @@ final class Application
         if ($pairs === null) {
             return 1;
         }
+        // Absolute paths are relative to the project when the source is one, else to the current folder.
+        $root = realpath($hasSource && is_dir($first) ? $first : '.');
         try {
-            $document = (new Dependents())->find($pairs, $targets, isset($options['transitive']), self::filter($patterns));
-        } catch (\InvalidArgumentException $e) {
-            fwrite($this->stderr, 'error: ' . $e->getMessage() . "\n");
-            return 1;
+            $document = (new Dependents())->find(
+                $pairs,
+                $targets,
+                isset($options['transitive']),
+                self::filter($patterns),
+                $through,
+                $maxDepth,
+                $root === false ? null : Path::normalize($root),
+            );
+        } catch (DependentsException $e) {
+            return $this->fail($e->diagnosticCode, $e->getMessage());
         }
         return $this->write($format === 'json' ? Json::encode($document) : Dependents::renderText($document), $options['output'] ?? null);
     }
@@ -288,28 +331,49 @@ final class Application
      */
     private function load(string $path, Scanner $scanner): ?PairsDocument
     {
-        $warnings = [];
+        $diagnostics = [];
         try {
             if (is_file($path)) {
                 $contents = file_get_contents($path);
                 if ($contents === false) {
-                    fwrite($this->stderr, "error: cannot read {$path}\n");
+                    $this->fail('document-unreadable', "cannot read {$path}");
                     return null;
                 }
-                $pairs = PairsDocument::fromArray(Json::decode($contents, $path), $warnings);
+                $warnings = [];
+                $pairs = PairsDocument::fromArray(Json::decode($contents, $path), $warnings, $diagnostics);
             } else {
                 $result = $scanner->scan($path);
                 $pairs = $result->pairs;
-                $warnings = $result->warnings;
+                $diagnostics = $result->diagnostics;
             }
-        } catch (ProjectException | DocumentException $e) {
-            fwrite($this->stderr, 'error: ' . $e->getMessage() . "\n");
+        } catch (ProjectException $e) {
+            $this->fail('project-unreadable', $e->getMessage());
+            return null;
+        } catch (DocumentException $e) {
+            $this->fail('document-invalid', $e->getMessage());
             return null;
         }
-        foreach ($warnings as $warning) {
-            fwrite($this->stderr, "warning: {$warning}\n");
-        }
+        $this->report($diagnostics);
         return $pairs;
+    }
+
+    /** @param list<Diagnostic> $diagnostics */
+    private function report(array $diagnostics): void
+    {
+        foreach ($diagnostics as $diagnostic) {
+            fwrite($this->stderr, ($this->diagnostics === 'json' ? $diagnostic->toJson() : $diagnostic->toText()) . "\n");
+        }
+    }
+
+    /**
+     * Writes the error that stops a command, and returns its exit code, 1.
+     *
+     * @param list<string> $files
+     */
+    private function fail(string $code, string $message, array $files = []): int
+    {
+        $this->report([Diagnostic::error($code, $message, $files)]);
+        return 1;
     }
 
     /** The default report title: the Composer package name, else the folder or file name. */
@@ -331,8 +395,7 @@ final class Application
     {
         if (is_string($file)) {
             if (@file_put_contents($file, $output) === false) {
-                fwrite($this->stderr, "error: cannot write {$file}\n");
-                return 1;
+                return $this->fail('output-unwritable', "cannot write {$file}");
             }
         } else {
             fwrite($this->stdout, $output);

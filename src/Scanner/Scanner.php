@@ -6,6 +6,7 @@ declare(strict_types=1);
 namespace Untangled\Scanner;
 
 use Untangled\Composer\ComposerProject;
+use Untangled\Diagnostic;
 use Untangled\Graph\PairsDocument;
 use Untangled\Path;
 
@@ -47,7 +48,7 @@ final class Scanner
         $project = ComposerProject::load($path);
         $root = $project->root;
         $vendorDir = $project->vendorDir();
-        $warnings = [];
+        $diagnostics = [];
 
         // Scan the autoloaded files, then any project file reached through a literal include.
         /** @var array<string, FileResult> $results */
@@ -56,7 +57,7 @@ final class Scanner
         $includeTargets = [];
         foreach ($this->sources as $source) {
             if (!file_exists($root . '/' . Path::normalize($source))) {
-                $warnings[] = "--source={$source}: no such file or folder in the project";
+                $diagnostics[] = Diagnostic::warning('source-not-found', "--source={$source}: no such file or folder in the project", [Path::normalize($source)]);
             }
         }
         $queue = $project->sourceFiles($this->dev, $this->sources);
@@ -68,7 +69,7 @@ final class Scanner
             $result = $this->fileScanner->scan($root . '/' . $file);
             $results[$file] = $result;
             if ($result->error !== null) {
-                $warnings[] = "{$file}: {$result->error}";
+                $diagnostics[] = self::fileDiagnostic($file, $result);
             }
             foreach ($result->includes as $include) {
                 $target = $this->resolveInclude($include, $root, $file, $vendorDir);
@@ -83,20 +84,20 @@ final class Scanner
         }
         ksort($results, SORT_STRING);
         if ($results === []) {
-            $warnings[] = self::NOTHING_SCANNED;
+            $diagnostics[] = Diagnostic::warning('nothing-scanned', self::NOTHING_SCANNED);
         }
 
         $packageListError = $project->packageListError();
         if ($packageListError !== null) {
-            $warnings[] = "{$packageListError}, so classes from third-party packages cannot be traced and show as"
-                . ' unresolved; run `composer install` again for a complete picture';
+            $diagnostics[] = Diagnostic::warning('package-list-unreadable', "{$packageListError}, so classes from third-party packages cannot be traced and show as"
+                . ' unresolved; run `composer install` again for a complete picture');
         } elseif (!$project->hasPackageList() && $project->requiresPackages()) {
-            $warnings[] = 'no vendor/composer/installed.json or composer.lock, so classes from third-party packages'
-                . ' cannot be traced and show as unresolved; run `composer install` first for a complete picture';
+            $diagnostics[] = Diagnostic::warning('package-list-missing', 'no vendor/composer/installed.json or composer.lock, so classes from third-party packages'
+                . ' cannot be traced and show as unresolved; run `composer install` first for a complete picture');
         }
         $uncovered = $project->uncoveredFiles(array_fill_keys(array_merge(array_keys($results), $project->sourceFiles(true, $this->sources)), true));
         if ($uncovered !== []) {
-            $warnings[] = self::uncoveredWarning($uncovered);
+            $diagnostics[] = Diagnostic::warning('uncovered-files', self::uncoveredWarning($uncovered), $uncovered);
         }
 
         // Symbol tables. Class and function names are case-insensitive in PHP, constants are not.
@@ -109,7 +110,7 @@ final class Scanner
                 if (isset($classes[$key])) {
                     // Declaring a class twice in one file (inside if/else) is a common polyfill pattern.
                     if ($classes[$key] !== $file) {
-                        $warnings[] = "{$file}: {$class} is also declared in {$classes[$key]}; using the first";
+                        $diagnostics[] = Diagnostic::warning('duplicate-declaration', "{$file}: {$class} is also declared in {$classes[$key]}; using the first", [$file, $classes[$key]]);
                     }
                     continue;
                 }
@@ -168,7 +169,13 @@ final class Scanner
             }
         }
 
-        return new ScanResult($pairs, $warnings);
+        return ScanResult::fromDiagnostics($pairs, $diagnostics);
+    }
+
+    /** The warning for a file that failed: it could not be read, or it did not parse. */
+    private static function fileDiagnostic(string $file, FileResult $result): Diagnostic
+    {
+        return Diagnostic::warning($result->unread === 'read' ? 'file-unreadable' : 'file-unparseable', "{$file}: {$result->error}", [$file]);
     }
 
     /** @param non-empty-list<string> $files */

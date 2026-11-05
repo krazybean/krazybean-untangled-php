@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 namespace Untangled\Analysis;
 
+use Untangled\Diagnostic;
 use Untangled\Graph\PairsDocument;
 
 /**
@@ -151,6 +152,17 @@ final class Clustering
             $named .= ' and ' . ($count - self::NAMED_UNMATCHED) . ' more';
         }
         return 'rules: ' . ($count === 1 ? '1 file matches no rule and becomes its own cluster' : "{$count} files match no rule and each becomes its own cluster") . ": {$named}";
+    }
+
+    /**
+     * The diagnostic for unmatched nodes: a warning, or an error with --strict.
+     *
+     * @param non-empty-list<string> $unmatched
+     */
+    public static function unmatchedDiagnostic(array $unmatched, bool $strict): Diagnostic
+    {
+        $message = self::describeUnmatched($unmatched);
+        return $strict ? Diagnostic::error('unmatched-rules', $message, $unmatched) : Diagnostic::warning('unmatched-rules', $message, $unmatched);
     }
 
     /**
